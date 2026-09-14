@@ -44,6 +44,8 @@ for (const kind of ['boar', 'hare', 'elk', 'wolf']) {
     const x = Math.floor(p.pos.x), z = Math.floor(p.pos.z) + 5;
     const y = g.world.topY(x, z);
     g.mobs.spawnGroup(k, x, y + 0.02, z);
+    // wandering is random, so tell them to walk: this checks locomotion, not the dice
+    g.mobs.list.forEach(m => { m.walking = true; m.think = 999; });
     const born = g.mobs.list.length;
     const start = g.mobs.list.map(m => [m.pos.x, m.pos.z]);
     await new Promise(r => setTimeout(r, 5000));
@@ -71,6 +73,7 @@ const fish = await page.evaluate(async () => {
     W.set(x, floor - 1, z, CM.B.STONE);
   }
   g.mobs.spawnGroup('fish', bx, floor + 1, bz);
+  g.mobs.list.forEach(m => { m.walking = true; m.think = 999; });
   const born = g.mobs.list.length;
   const m0 = g.mobs.list[0];
   const start = m0 ? [m0.pos.x, m0.pos.z] : null;
@@ -117,6 +120,18 @@ console.log('  spawn mix by day:  ', JSON.stringify(table.day));
 console.log('  spawn mix by night:', JSON.stringify(table.night));
 check('wolves are a night thing', !table.day.wolf && table.night.wolf > 50);
 check('daylight still brings grazers', table.day.boar > 50 && table.day.elk > 0);
+
+// only one animal may call at a time, and not often
+const calls = await page.evaluate(() => {
+  const m = CM.game.mobs;
+  m.callT = 0;
+  const first = m.mayCall();          // allowed
+  const second = m.mayCall();         // blocked by the cooldown it just set
+  const wait = m.callT;
+  return { first, second, wait: +wait.toFixed(1) };
+});
+check('animal calls do not overlap', calls.first && !calls.second, `next call allowed in ${calls.wait}s`);
+check('calls are spaced out', calls.wait >= 14, `${calls.wait}s cooldown`);
 
 // birds overhead by day, glimmering motes after dark
 const amb = await page.evaluate(async () => {

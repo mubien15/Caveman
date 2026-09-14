@@ -320,8 +320,9 @@
       this.yaw = Math.random() * Math.PI * 2; this.yawTarget = this.yaw;
       this.health = this.spec.hp;
       this.think = Math.random() * 2; this.walking = Math.random() < (this.spec.restless || 0.5); this.fleeT = 0; this.hitT = 0; this.biteT = 0;
-      this.phase = Math.random() * 6; this.onGround = false; this.dead = false; this.voiceT = 4 + Math.random() * 20;
+      this.phase = Math.random() * 6; this.onGround = false; this.dead = false; this.voiceT = 25 + Math.random() * 70;
       const g = this.group = new THREE.Group();
+      this.herd = null;                                   // set by Mobs, for the shared call cooldown
       const rig = this.spec.model(g);
       this.head = rig.head; this.legs = rig.legs; this.tail = rig.tail;
       g.position.copy(this.pos);
@@ -390,11 +391,13 @@
       if (this.tail) this.tail.rotation.x = -0.5 + Math.sin(this.phase * 0.7) * 0.25;
 
       // An occasional call, as long as it is not right on top of the player.
+      // A call now and then, and only one animal at a time: a dozen creatures each
+      // piping up every half minute turns into constant noise out of nowhere.
       this.voiceT -= dt;
       if (this.voiceT <= 0) {
-        this.voiceT = 12 + Math.random() * 26;
+        this.voiceT = 45 + Math.random() * 75;
         const wantsNight = this.kind === 'wolf';
-        if (S.idle && near > 6 && near < 40 && (!wantsNight || night > 0.5)) CM.sfx(S.idle);
+        if (S.idle && near > 8 && near < 34 && (!wantsNight || night > 0.5) && this.herd && this.herd.mayCall()) CM.sfx(S.idle);
       }
       this.place();
     }
@@ -496,7 +499,8 @@
   CM.Ambience = Ambience;
 
   class Mobs {
-    constructor(scene) { this.scene = scene; this.world = null; this.list = []; this.spawnT = 1; }
+    constructor(scene) { this.scene = scene; this.world = null; this.list = []; this.spawnT = 1; this.callT = 6; }
+    mayCall() { if (this.callT > 0) return false; this.callT = 14 + Math.random() * 18; return true; }
     setWorld(world) { this.clear(); this.world = world; }
     clear() { for (const m of this.list) this.scene.remove(m.group); this.list = []; }
     remove(m) { this.scene.remove(m.group); this.list.splice(this.list.indexOf(m), 1); }
@@ -504,6 +508,7 @@
 
     update(dt, player, night) {
       this.night = night || 0;
+      this.callT -= dt;
       this.spawnT -= dt;
       if (this.spawnT <= 0) { this.spawnT = 2.2; if (this.list.length < 12) this.trySpawn(player); }
       for (let i = this.list.length - 1; i >= 0; i--) {
@@ -559,8 +564,10 @@
       const S = SPECIES[kind];
       const herd = S.herd[0] + Math.floor(Math.random() * (S.herd[1] - S.herd[0] + 1));
       for (let i = 0; i < herd && this.list.length < 12; i++) {
-        this.list.push(new Creature(this.scene, kind,
-          x + 0.5 + (Math.random() - 0.5) * 1.4, y, z + 0.5 + (Math.random() - 0.5) * 1.4));
+        const c = new Creature(this.scene, kind,
+          x + 0.5 + (Math.random() - 0.5) * 1.4, y, z + 0.5 + (Math.random() - 0.5) * 1.4);
+        c.herd = this;
+        this.list.push(c);
       }
     }
 

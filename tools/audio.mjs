@@ -74,9 +74,19 @@ await page.evaluate(async () => {
 });
 const walked = await page.evaluate(() => ({ voices: window.__voices, buffers: window.__buffers }));
 console.log('  after walking 2.5s:      ', JSON.stringify(walked));
-// how loud is the music on its own?
-const musicLvl = await page.evaluate(() => window.__level(12000));   // long enough to catch a phrase, not just the pad
-console.log('  music alone (12s):       ', JSON.stringify(musicLvl));
+// The complaint was gaps and loud notes, so measure a run of windows rather than one:
+// every window should carry sound, and none should spike.
+const windows = await page.evaluate(async () => {
+  const out = [];
+  for (let i = 0; i < 8; i++) out.push(await window.__level(2000));
+  return out;
+});
+const rmsList = windows.map(w => w.rms), peakList = windows.map(w => w.peak);
+const musicLvl = { peak: Math.max(...peakList), rms: +(rmsList.reduce((a, b) => a + b, 0) / rmsList.length).toFixed(4) };
+console.log('  music over 8 x 2s windows:');
+console.log('    rms per window: ' + rmsList.join(', '));
+console.log('    quietest window rms: ' + Math.min(...rmsList) + '   loudest peak: ' + musicLvl.peak);
+console.log('    steadiness (quietest/loudest rms): ' + (Math.min(...rmsList) / Math.max(...rmsList)).toFixed(2));
 
 // and how loud is a mining hit, for comparison
 const sfxLvl = await page.evaluate(async () => {

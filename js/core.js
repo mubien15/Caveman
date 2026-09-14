@@ -108,8 +108,8 @@ window.CM = window.CM || {};
   const TONES = {
     hit: [240, 90, 'square', 0.12], hurt: [200, 70, 'sawtooth', 0.22], eat: [430, 260, 'triangle', 0.14],
     craft: [520, 820, 'triangle', 0.16], pop: [680, 1000, 'sine', 0.1], squeal: [900, 500, 'square', 0.18],
-    growl: [130, 78, 'sawtooth', 0.3], howl: [420, 300, 'sine', 0.9], chirp: [1800, 2600, 'sine', 0.06],
-    bleat: [520, 380, 'triangle', 0.22],
+    growl: [130, 78, 'sawtooth', 0.3, 0.07], howl: [420, 300, 'sine', 0.9, 0.06], chirp: [1800, 2600, 'sine', 0.06, 0.04],
+    bleat: [520, 380, 'triangle', 0.22, 0.06],
   };
   // What the ground sounds like underfoot: [filter cutoff, loudness].
   const GROUND = {
@@ -155,7 +155,7 @@ window.CM = window.CM || {};
         o.type = m[2];
         o.frequency.setValueAtTime(m[0], t);
         o.frequency.exponentialRampToValueAtTime(m[1], t + m[3]);
-        out.gain.setValueAtTime(0.16, t);
+        out.gain.setValueAtTime(m[4] === undefined ? 0.16 : m[4], t);
         out.gain.exponentialRampToValueAtTime(0.001, t + m[3] + 0.05);
         o.connect(out); o.start(t); o.stop(t + m[3] + 0.08);
       }
@@ -169,101 +169,75 @@ window.CM = window.CM || {};
   };
 
   // ---- generative ambient score ----
-  // Sparse piano-ish phrases over a slow pad, with long silences between them.
-  // Warm and major by day, lower and more spread out at night.
+  // A continuous wavering pad rather than played notes: four sustained voices that drift in
+  // pitch and swell independently, gliding to a new chord every so often. It never stops and
+  // never lands on a beat, so there is no gap to notice and nothing to pick out as a "note".
   CM.music = (function () {
     const C3 = 130.81;
-    const DAY_CHORDS = [[0, 4, 7, 11], [5, 9, 12, 16], [9, 12, 16, 19], [7, 11, 14, 17]];
-    const NIGHT_CHORDS = [[0, 3, 7, 10], [8, 12, 15, 19], [5, 8, 12, 15], [3, 7, 10, 14]];
+    const DAY_CHORDS = [[0, 7, 12, 16], [-3, 4, 9, 12], [-7, 5, 9, 12], [-5, 2, 7, 11]];
+    const NIGHT_CHORDS = [[-3, 4, 9, 12], [-10, 2, 5, 9], [-7, 5, 9, 12], [-8, 4, 7, 11]];
     const semi = n => C3 * Math.pow(2, n / 12);
-    const pick = a => a[Math.floor(Math.random() * a.length)];
 
-    let master = null, wash = null, lp = null, timer = 0, retry = 0, bar = 0, playing = false, night = 0;
+    let master = null, wash = null, lp = null, voices = null, timer = 0, retry = 0, bar = 0, playing = false, night = 0;
 
     function build() {
       master = actx.createGain();
       master.gain.value = 0.0001;
       const squash = actx.createDynamicsCompressor();
-      squash.threshold.value = -20;
-      squash.knee.value = 14;
-      squash.ratio.value = 7;
-      squash.attack.value = 0.008;
-      squash.release.value = 0.3;
-      master.__out = squash;
+      squash.threshold.value = -24; squash.knee.value = 16; squash.ratio.value = 6;
+      squash.attack.value = 0.02; squash.release.value = 0.5;
       lp = actx.createBiquadFilter();
       lp.type = 'lowpass';
-      lp.frequency.value = 2200;
-      lp.Q.value = 0.3;
-      // Two delays instead of a reverb: cheap, and it gives the notes somewhere to fade into.
+      lp.frequency.value = 900;
+      lp.Q.value = 0.2;
       wash = actx.createGain();
-      wash.gain.value = 0.8;
-      const d1 = actx.createDelay(1.5), d2 = actx.createDelay(1.5), fb = actx.createGain();
-      d1.delayTime.value = 0.41; d2.delayTime.value = 0.67; fb.gain.value = 0.32;
+      wash.gain.value = 0.6;
+      const d1 = actx.createDelay(2), d2 = actx.createDelay(2), fb = actx.createGain();
+      d1.delayTime.value = 0.53; d2.delayTime.value = 0.79; fb.gain.value = 0.3;
       wash.connect(d1); d1.connect(fb); fb.connect(d2); d2.connect(lp);
       wash.connect(lp);
       lp.connect(master);
-      master.connect(master.__out);
-      master.__out.connect(actx.destination);
-    }
+      master.connect(squash);
+      squash.connect(actx.destination);
 
-    // A struck note: quick on, long tail.
-    function note(freq, t, dur, peak) {
-      const g = actx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(peak, t + 0.014);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      const f = actx.createBiquadFilter();
-      f.type = 'lowpass';
-      f.frequency.setValueAtTime(2600, t);
-      f.frequency.exponentialRampToValueAtTime(900, t + dur * 0.7);
-      for (const v of [['sine', 0, 1], ['triangle', 5, 0.3]]) {
-        const o = actx.createOscillator(), og = actx.createGain();
-        o.type = v[0];
-        o.frequency.value = freq;
-        o.detune.value = v[1];
-        og.gain.value = v[2];
-        o.connect(og); og.connect(f);
-        o.start(t); o.stop(t + dur + 0.1);
+      voices = [];
+      for (let i = 0; i < 4; i++) {
+        const osc = actx.createOscillator();
+        osc.type = i === 2 ? 'triangle' : 'sine';
+        osc.frequency.value = semi(DAY_CHORDS[0][i]);
+
+        const vg = actx.createGain();
+        const base = 0.05 - i * 0.006;
+        vg.gain.value = base;
+
+        // Slow swell, so the pad breathes instead of sitting still.
+        const amp = actx.createOscillator(), ampDepth = actx.createGain();
+        amp.frequency.value = 0.045 + i * 0.019;
+        ampDepth.gain.value = base * 0.55;
+        amp.connect(ampDepth); ampDepth.connect(vg.gain);
+
+        // A few cents of drift each, which is what makes it waver rather than hum.
+        const drift = actx.createOscillator(), driftDepth = actx.createGain();
+        drift.frequency.value = 0.06 + i * 0.014;
+        driftDepth.gain.value = 5 + i;
+        drift.connect(driftDepth); driftDepth.connect(osc.detune);
+
+        osc.connect(vg); vg.connect(wash);
+        osc.start(); amp.start(); drift.start();
+        voices.push(osc);
       }
-      f.connect(g); g.connect(wash);
     }
 
-    // A held tone underneath, swelling in and out.
-    function pad(freq, t, dur, peak) {
-      const o = actx.createOscillator(), g = actx.createGain();
-      o.type = 'sine';
-      o.frequency.value = freq;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(peak, t + dur * 0.35);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(g); g.connect(wash);
-      o.start(t); o.stop(t + dur + 0.1);
-    }
-
-    function schedule() {
+    function drift() {
       if (!playing) return;
+      const t = actx.currentTime;
       const dark = night > 0.5;
-      const t = actx.currentTime + 0.1;
-      const chords = dark ? NIGHT_CHORDS : DAY_CHORDS;
-      const chord = chords[bar % chords.length];
-      const span = dark ? 14 : 11.5;
-      lp.frequency.setTargetAtTime(dark ? 1300 : 2400, t, 4);
-
-      for (let i = 0; i < 3; i++) pad(semi(chord[i] - 12), t + i * 0.4, span * 0.92, 0.075 - i * 0.01);
-
-      // Most bars carry a short phrase; the rest are left as silence, which is most of the charm.
-      if (Math.random() < (dark ? 0.5 : 0.72)) {
-        let at = t + 0.5 + Math.random() * 1.4;
-        const count = 3 + Math.floor(Math.random() * 3);
-        for (let i = 0; i < count; i++) {
-          const deg = pick(chord) + (Math.random() < 0.45 ? 12 : 24);
-          note(semi(deg), at, 3.4, 0.15 + Math.random() * 0.06);
-          at += 0.42 + Math.random() * 0.8;
-          if (at > t + span - 1) break;
-        }
-      }
+      const chord = (dark ? NIGHT_CHORDS : DAY_CHORDS)[bar % 4];
+      lp.frequency.setTargetAtTime(dark ? 620 : 1000, t, 6);
+      // Glide, never jump: each voice takes several seconds to arrive at its new note.
+      voices.forEach((o, i) => o.frequency.setTargetAtTime(semi(chord[i]), t, 3.5));
       bar++;
-      timer = setTimeout(schedule, span * 820);
+      timer = setTimeout(drift, (dark ? 19000 : 16000));
     }
 
     return {
@@ -271,8 +245,7 @@ window.CM = window.CM || {};
         if (!CM.options.music) return;
         CM.audioUnlock();
         if (!actx) return;
-        // Safari resumes the context asynchronously, so a check right here can still say
-        // "suspended" on a phone. Keep looking rather than giving up on the whole session.
+        // Safari resumes asynchronously, so keep looking rather than giving up for the session.
         if (actx.state !== 'running') {
           if (!retry) retry = setInterval(() => {
             if (!actx || actx.state === 'running') { clearInterval(retry); retry = 0; CM.music.start(); }
@@ -286,8 +259,8 @@ window.CM = window.CM || {};
           playing = true;
           master.gain.cancelScheduledValues(actx.currentTime);
           master.gain.setValueAtTime(Math.max(0.0001, master.gain.value), actx.currentTime);
-          master.gain.exponentialRampToValueAtTime(0.5, actx.currentTime + 3);
-          schedule();
+          master.gain.exponentialRampToValueAtTime(0.3, actx.currentTime + 6);
+          drift();
         } catch (e) { playing = false; }
       },
       stop() {
@@ -298,10 +271,9 @@ window.CM = window.CM || {};
         try {
           master.gain.cancelScheduledValues(actx.currentTime);
           master.gain.setValueAtTime(master.gain.value, actx.currentTime);
-          master.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 1.5);
+          master.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 2);
         } catch (e) { /* ignore */ }
       },
-      // 0 = daylight, 1 = deep night; shifts the harmony, the filter and how often it plays.
       setNight(v) { night = v; },
       toggle(on) { if (on) this.start(); else this.stop(); },
     };

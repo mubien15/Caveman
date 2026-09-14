@@ -156,8 +156,9 @@
       const k = Math.min(1, (this.onGround ? 16 : this.inWater ? 6 : 5) * dt);
       v.x += (mx * speed - v.x) * k;
       v.z += (mz * speed - v.z) * k;
+      const ground = CM.groundSound(W.get(Math.floor(p.x), Math.floor(p.y - 0.1), Math.floor(p.z)));
       if (this.inWater) { v.y -= 10 * dt; v.y *= Math.max(0, 1 - 3 * dt); if (inp.jump) v.y = Math.min(v.y + 26 * dt, 3.4); }
-      else { v.y = Math.max(-45, v.y - 28 * dt); if (inp.jump && this.onGround) v.y = 8.6; }
+      else { v.y = Math.max(-45, v.y - 28 * dt); if (inp.jump && this.onGround) { v.y = 8.6; CM.sfx('jump', ground); } }
       if (inp.autoJump && this.onGround && !this.inWater && len > 0.2) {
         const bx = Math.floor(p.x), bz = Math.floor(p.z);
         const ax = Math.floor(p.x + (mx / Math.max(len, 1e-6)) * 0.6), az = Math.floor(p.z + (mz / Math.max(len, 1e-6)) * 0.6), fy = Math.floor(p.y + 0.01);
@@ -173,8 +174,10 @@
         if (v.x && !footing(p.x + v.x * dt, p.z)) v.x = 0;
         if (v.z && !footing(p.x, p.z + v.z * dt)) v.z = 0;
       }
+      const wasOnGround = this.onGround;
       const r = CM.sweep(W, p, v, dt, 0.3, 1.8);
       this.onGround = r.ground;
+      if (!wasOnGround && this.onGround && !this.inWater) CM.sfx('land', ground);
 
       if (this.onGround || this.inWater) {
         if (this.fallTop !== null && !this.inWater) { const d = this.fallTop - p.y; if (d > 3.5) this.hurt(Math.floor(d - 3), 'You fell from a great height.'); }
@@ -187,7 +190,7 @@
       if (this.hungerT > 32) { this.hungerT = 0; if (this.hunger > 0) this.hunger--; }
       if (this.hunger >= 16 && this.health < 20) { this.regenT += dt; if (this.regenT > 3) { this.regenT = 0; this.health++; this.hungerT += 6; } } else this.regenT = 0;
       if (this.hunger <= 0) { this.starveT += dt; if (this.starveT > 4) { this.starveT = 0; this.hurt(1, 'You starved. Hunt boar and roast the meat.'); } } else this.starveT = 0;
-      if (this.onGround && this.moveAmt > 0.3 && !this.sneaking) { this.stepT -= dt * this.moveAmt; if (this.stepT <= 0) { this.stepT = 0.42; CM.sfx('step'); } }
+      if (this.onGround && this.moveAmt > 0.3 && !this.sneaking) { this.stepT -= dt * this.moveAmt; if (this.stepT <= 0) { this.stepT = this.sprinting ? 0.32 : 0.42; CM.sfx('step', ground); } }
       if (this.hurtT > 0) this.hurtT -= dt;
     }
     hurt(n, cause) {

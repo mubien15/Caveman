@@ -75,6 +75,7 @@
     if (!playing()) return;
     e.preventDefault();
     CM.audioUnlock();
+    CM.music.start();
     if (e.clientX < window.innerWidth * 0.42 && joy.id === null) {
       joy.id = e.pointerId; joy.ox = e.clientX; joy.oy = e.clientY; joy.sprintSince = 0;
       joyEl.style.left = (e.clientX - 62) + 'px'; joyEl.style.top = (e.clientY - 62) + 'px'; joyEl.style.bottom = 'auto';
@@ -136,6 +137,7 @@
     el.addEventListener('pointerdown', e => {
       e.preventDefault(); e.stopPropagation();
       CM.audioUnlock();
+      CM.music.start();
       input.lastTouch = performance.now();
       el.classList.add('on');
       try { el.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
@@ -168,6 +170,7 @@
   canvas.addEventListener('mousedown', e => {
     if (recentTouch() || !playing()) return;
     CM.audioUnlock();
+    CM.music.start();
     if (!input.locked && canvas.requestPointerLock) {
       try { const r = canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (_) { /* drag-to-look fallback */ }
     }

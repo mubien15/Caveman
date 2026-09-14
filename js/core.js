@@ -103,24 +103,44 @@ window.CM = window.CM || {};
     hit: [240, 90, 'square', 0.12], hurt: [200, 70, 'sawtooth', 0.22], eat: [430, 260, 'triangle', 0.14],
     craft: [520, 820, 'triangle', 0.16], pop: [680, 1000, 'sine', 0.1], squeal: [900, 500, 'square', 0.18],
   };
-  CM.sfx = function (kind) {
+  // What the ground sounds like underfoot: [filter cutoff, loudness].
+  const GROUND = {
+    grass: [520, 0.15], sand: [340, 0.13], stone: [1100, 0.16], wood: [700, 0.15], soft: [420, 0.12],
+  };
+  CM.sfx = function (kind, ground) {
     if (!CM.options.sound || !actx || actx.state !== 'running') return;
     try {
       const t = actx.currentTime;
       const out = actx.createGain();
       out.connect(actx.destination);
-      if (kind === 'break' || kind === 'place' || kind === 'step') {
-        const len = kind === 'break' ? 0.2 : 0.09;
+      if (kind === 'break' || kind === 'place' || kind === 'step' || kind === 'land' || kind === 'jump') {
+        const g = GROUND[ground] || GROUND.grass;
+        const len = kind === 'break' ? 0.2 : kind === 'land' ? 0.17 : kind === 'jump' ? 0.07 : 0.1;
         const buf = actx.createBuffer(1, Math.floor(actx.sampleRate * len), actx.sampleRate);
         const d = buf.getChannelData(0);
-        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2);
+        const shape = kind === 'land' ? 1.4 : 2;
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, shape);
         const src = actx.createBufferSource();
         src.buffer = buf;
+        // A little wobble in pitch and level keeps a walk from sounding like a metronome.
+        src.playbackRate.value = kind === 'step' ? 0.9 + Math.random() * 0.25 : 1;
         const f = actx.createBiquadFilter();
         f.type = 'lowpass';
-        f.frequency.value = kind === 'break' ? 1500 : kind === 'place' ? 800 : 500;
-        out.gain.value = kind === 'step' ? 0.06 : 0.35;
+        f.frequency.value = kind === 'break' ? 1500 : kind === 'place' ? 800
+          : kind === 'land' ? g[0] * 0.5 : kind === 'jump' ? g[0] * 0.8 : g[0];
+        out.gain.value = kind === 'break' || kind === 'place' ? 0.35
+          : kind === 'land' ? g[1] * 1.9 : kind === 'jump' ? g[1] * 0.5 : g[1] * (0.85 + Math.random() * 0.3);
         src.connect(f); f.connect(out); src.start(t);
+        if (kind === 'land') {                       // a soft thump under the scuff
+          const o = actx.createOscillator(), og = actx.createGain();
+          o.type = 'sine';
+          o.frequency.setValueAtTime(150, t);
+          o.frequency.exponentialRampToValueAtTime(62, t + 0.14);
+          og.gain.setValueAtTime(0.16, t);
+          og.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+          o.connect(og); og.connect(actx.destination);
+          o.start(t); o.stop(t + 0.22);
+        }
       } else {
         const m = TONES[kind] || TONES.pop;
         const o = actx.createOscillator();
@@ -141,99 +161,142 @@ window.CM = window.CM || {};
   };
 
   // ---- generative ambient score ----
-  // Slow pentatonic pads over a root drone. Brighter by day, darker at night.
+  // Sparse piano-ish phrases over a slow pad, with long silences between them.
+  // Warm and major by day, lower and more spread out at night.
   CM.music = (function () {
-    const ROOT = 110; // A2
-    const PENT = [0, 3, 5, 7, 10];                       // minor pentatonic steps
-    const DAY_CHORDS = [[0, 7, 12], [5, 12, 17], [3, 10, 15], [7, 14, 19]];
-    const NIGHT_CHORDS = [[0, 3, 10], [3, 10, 14], [-2, 5, 12], [0, 7, 15]];
-    const semi = n => ROOT * Math.pow(2, n / 12);
+    const C3 = 130.81;
+    const DAY_CHORDS = [[0, 4, 7, 11], [5, 9, 12, 16], [9, 12, 16, 19], [7, 11, 14, 17]];
+    const NIGHT_CHORDS = [[0, 3, 7, 10], [8, 12, 15, 19], [5, 8, 12, 15], [3, 7, 10, 14]];
+    const semi = n => C3 * Math.pow(2, n / 12);
+    const pick = a => a[Math.floor(Math.random() * a.length)];
 
-    let master = null, wash = null, lp = null, drone = null, timer = 0, bar = 0, playing = false, night = 0;
+    let master = null, wash = null, lp = null, timer = 0, retry = 0, bar = 0, playing = false, night = 0;
 
     function build() {
       master = actx.createGain();
-      master.gain.value = 0;
+      master.gain.value = 0.0001;
+      const squash = actx.createDynamicsCompressor();
+      squash.threshold.value = -20;
+      squash.knee.value = 14;
+      squash.ratio.value = 7;
+      squash.attack.value = 0.008;
+      squash.release.value = 0.3;
+      master.__out = squash;
       lp = actx.createBiquadFilter();
       lp.type = 'lowpass';
-      lp.frequency.value = 900;
-      lp.Q.value = 0.4;
-      // A pair of delays stands in for a reverb tail without the cost of a convolver.
+      lp.frequency.value = 2200;
+      lp.Q.value = 0.3;
+      // Two delays instead of a reverb: cheap, and it gives the notes somewhere to fade into.
       wash = actx.createGain();
-      wash.gain.value = 0.34;
+      wash.gain.value = 0.8;
       const d1 = actx.createDelay(1.5), d2 = actx.createDelay(1.5), fb = actx.createGain();
-      d1.delayTime.value = 0.37; d2.delayTime.value = 0.61; fb.gain.value = 0.38;
+      d1.delayTime.value = 0.41; d2.delayTime.value = 0.67; fb.gain.value = 0.32;
       wash.connect(d1); d1.connect(fb); fb.connect(d2); d2.connect(lp);
       wash.connect(lp);
       lp.connect(master);
-      master.connect(actx.destination);
+      master.connect(master.__out);
+      master.__out.connect(actx.destination);
     }
 
-    function voice(freq, t, dur, peak, type) {
+    // A struck note: quick on, long tail.
+    function note(freq, t, dur, peak) {
+      const g = actx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + 0.014);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      const f = actx.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.setValueAtTime(2600, t);
+      f.frequency.exponentialRampToValueAtTime(900, t + dur * 0.7);
+      for (const v of [['sine', 0, 1], ['triangle', 5, 0.3]]) {
+        const o = actx.createOscillator(), og = actx.createGain();
+        o.type = v[0];
+        o.frequency.value = freq;
+        o.detune.value = v[1];
+        og.gain.value = v[2];
+        o.connect(og); og.connect(f);
+        o.start(t); o.stop(t + dur + 0.1);
+      }
+      f.connect(g); g.connect(wash);
+    }
+
+    // A held tone underneath, swelling in and out.
+    function pad(freq, t, dur, peak) {
       const o = actx.createOscillator(), g = actx.createGain();
-      o.type = type || 'sine';
+      o.type = 'sine';
       o.frequency.value = freq;
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(peak, t + dur * 0.42);   // long swell in
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);        // long fade out
+      g.gain.exponentialRampToValueAtTime(peak, t + dur * 0.35);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       o.connect(g); g.connect(wash);
       o.start(t); o.stop(t + dur + 0.1);
     }
 
     function schedule() {
       if (!playing) return;
-      const t = actx.currentTime + 0.1, len = 9.5;
-      const chords = night > 0.5 ? NIGHT_CHORDS : DAY_CHORDS;
+      const dark = night > 0.5;
+      const t = actx.currentTime + 0.1;
+      const chords = dark ? NIGHT_CHORDS : DAY_CHORDS;
       const chord = chords[bar % chords.length];
-      lp.frequency.setTargetAtTime(night > 0.5 ? 620 : 1150, t, 3);
-      for (let i = 0; i < chord.length; i++) {
-        voice(semi(chord[i]) * (i ? 1 : 0.5), t + i * 0.5, len, 0.05 - i * 0.008, i === 1 ? 'triangle' : 'sine');
-      }
-      // A sparse note on top, often left out so the pad can breathe.
-      if (Math.random() < 0.62) {
-        const step = PENT[Math.floor(Math.random() * PENT.length)] + (Math.random() < 0.4 ? 12 : 24);
-        voice(semi(step), t + 1.4 + Math.random() * 4, 4.5, 0.035, 'triangle');
+      const span = dark ? 14 : 11.5;
+      lp.frequency.setTargetAtTime(dark ? 1300 : 2400, t, 4);
+
+      for (let i = 0; i < 3; i++) pad(semi(chord[i] - 12), t + i * 0.4, span * 0.92, 0.075 - i * 0.01);
+
+      // Most bars carry a short phrase; the rest are left as silence, which is most of the charm.
+      if (Math.random() < (dark ? 0.5 : 0.72)) {
+        let at = t + 0.5 + Math.random() * 1.4;
+        const count = 3 + Math.floor(Math.random() * 3);
+        for (let i = 0; i < count; i++) {
+          const deg = pick(chord) + (Math.random() < 0.45 ? 12 : 24);
+          note(semi(deg), at, 3.4, 0.15 + Math.random() * 0.06);
+          at += 0.42 + Math.random() * 0.8;
+          if (at > t + span - 1) break;
+        }
       }
       bar++;
-      timer = setTimeout(schedule, len * 700);
+      timer = setTimeout(schedule, span * 820);
     }
 
     return {
       start() {
-        if (playing || !CM.options.music) return;
+        if (!CM.options.music) return;
         CM.audioUnlock();
-        if (!actx || actx.state !== 'running') return;
+        if (!actx) return;
+        // Safari resumes the context asynchronously, so a check right here can still say
+        // "suspended" on a phone. Keep looking rather than giving up on the whole session.
+        if (actx.state !== 'running') {
+          if (!retry) retry = setInterval(() => {
+            if (!actx || actx.state === 'running') { clearInterval(retry); retry = 0; CM.music.start(); }
+          }, 500);
+          return;
+        }
+        if (retry) { clearInterval(retry); retry = 0; }
+        if (playing) return;
         try {
           if (!master) build();
           playing = true;
           master.gain.cancelScheduledValues(actx.currentTime);
           master.gain.setValueAtTime(Math.max(0.0001, master.gain.value), actx.currentTime);
-          master.gain.linearRampToValueAtTime(0.5, actx.currentTime + 4);
-          if (!drone) {
-            drone = actx.createOscillator();
-            const dg = actx.createGain();
-            dg.gain.value = 0.035;
-            drone.type = 'sine';
-            drone.frequency.value = ROOT / 2;
-            drone.connect(dg); dg.connect(lp);
-            drone.start();
-          }
+          master.gain.exponentialRampToValueAtTime(0.5, actx.currentTime + 3);
           schedule();
         } catch (e) { playing = false; }
       },
       stop() {
+        if (retry) { clearInterval(retry); retry = 0; }
         if (!playing) return;
         playing = false;
         clearTimeout(timer);
         try {
           master.gain.cancelScheduledValues(actx.currentTime);
           master.gain.setValueAtTime(master.gain.value, actx.currentTime);
-          master.gain.linearRampToValueAtTime(0.0001, actx.currentTime + 2);
+          master.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + 1.5);
         } catch (e) { /* ignore */ }
       },
-      // 0 = daylight, 1 = deep night; shifts the harmony and the filter.
+      // 0 = daylight, 1 = deep night; shifts the harmony, the filter and how often it plays.
       setNight(v) { night = v; },
       toggle(on) { if (on) this.start(); else this.stop(); },
     };
   })();
+
 })(window.CM);

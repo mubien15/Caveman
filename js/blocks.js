@@ -43,6 +43,14 @@
 
   CM.info = id => (id >= 100 ? CM.items[id] : CM.blocks[id]);
 
+  // Which footstep a block sounds like when you walk on it.
+  const GROUND_OF = {
+    [B.SAND]: 'sand', [B.CLAY]: 'sand', [B.STONE]: 'stone', [B.COBBLE]: 'stone', [B.BEDROCK]: 'stone',
+    [B.FLINT_ORE]: 'stone', [B.COAL_ORE]: 'stone', [B.MUDBRICK]: 'stone', [B.GLASS]: 'stone',
+    [B.LOG]: 'wood', [B.PLANKS]: 'wood', [B.LEAVES]: 'soft', [B.THATCH]: 'soft',
+  };
+  CM.groundSound = id => GROUND_OF[id] || 'grass';
+
   CM.recipes = [
     { out: [B.PLANKS, 4], ins: [[B.LOG, 1]] },
     { out: [I.STICK, 4], ins: [[B.PLANKS, 2]] },

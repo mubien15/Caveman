@@ -26,7 +26,10 @@ strike · right-click place or eat · `1`–`9` or scroll to pick a slot · `E` 
 ## What is in the world
 
 Grass, sand and stone terrain with carved caves, flint and coal seams, clay by the water,
-trees, boar herds, and a mud-brick hut waiting at spawn. Ten recipes turn logs and flint into
+trees, and a mud-brick hut waiting at spawn. The world is inhabited: boar root about, hares
+bound away before you get close, elk graze in small herds, fish hold station in the shallows,
+and after dark wolves come hunting — they will run you down if you let them, though a sprint
+outpaces them. Birds wheel overhead by day and fireflies wink over the grass at night. Ten recipes turn logs and flint into
 planks, sticks, a pick, an axe, a club, torches, a campfire, thatch, mud brick and glass. Roast
 meat on a fire before you eat it. Hunger drains, falls hurt, and the world saves itself to
 `localStorage` as you play.
@@ -76,6 +79,9 @@ node tools/smoke.mjs                    # desktop: loads, plays, fast-forwards t
 node tools/touch.mjs                    # phone: ten control checks
 node tools/layout.mjs                   # screenshots portrait, landscape and desktop
 node tools/audit.mjs                    # the same world at dawn, dusk, night, underground
+node tools/fauna.mjs                    # every species spawns, moves, hunts and drops
+node tools/audio.mjs                    # measures what actually reaches the speakers
+node tools/portraits.mjs                # one creature at a time, for judging the models
 ```
 
 Screenshots land in `shots/`. `tools/build.sh` exists because the game is also published as a

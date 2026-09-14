@@ -10,6 +10,12 @@ window.CM = window.CM || {};
 
   CM.clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
+  // 1 in full daylight, 0 deep at night. The sky, the music and what prowls about all read this.
+  CM.dayFactor = function (clock) {
+    const sunY = Math.sin(((clock / CM.DAY_LEN) % 1) * Math.PI * 2);
+    return CM.clamp((sunY + 0.14) / 0.44, 0, 1);
+  };
+
   // Daylight reaching a cell, given the highest cover above it (anything, and anything solid).
   // Leaves only dapple the ground; rock and dirt shut the light out properly.
   CM.skyFalloff = function (y, topAny, topSolid) {
@@ -102,6 +108,8 @@ window.CM = window.CM || {};
   const TONES = {
     hit: [240, 90, 'square', 0.12], hurt: [200, 70, 'sawtooth', 0.22], eat: [430, 260, 'triangle', 0.14],
     craft: [520, 820, 'triangle', 0.16], pop: [680, 1000, 'sine', 0.1], squeal: [900, 500, 'square', 0.18],
+    growl: [130, 78, 'sawtooth', 0.3], howl: [420, 300, 'sine', 0.9], chirp: [1800, 2600, 'sine', 0.06],
+    bleat: [520, 380, 'triangle', 0.22],
   };
   // What the ground sounds like underfoot: [filter cutoff, loudness].
   const GROUND = {

@@ -22,7 +22,7 @@
   atlasTex.generateMipmaps = false;
   const materials = {
     opaque: new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, alphaTest: 0.5 }),
-    water: new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, transparent: true, opacity: 0.82, depthWrite: false, side: THREE.DoubleSide }),
+    water: new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, transparent: true, opacity: 0.72, depthWrite: false, side: THREE.DoubleSide }),
   };
 
   // ---------- light ----------
@@ -259,12 +259,14 @@
   }
   const particles = new CM.Particles(scene);
   const mobs = new CM.Mobs(scene);
+  const ambience = new CM.Ambience(scene);
 
   const game = CM.game = {
     state: 'loading', world: null, player: null, data: null, cameraMode: 0, clock: 0, afterLoad: 'title',
     focus: new THREE.Vector3(), titleCenter: new THREE.Vector3(), spawn: new THREE.Vector3(),
     mining: null, miningP: 0, attackCD: 0, useRepeat: 0, swing: 0, saveT: 0, titleAngle: 0, bob: 0, walkPhase: 0,
     pendingSpawn: false, hadPlayer: false, warnedSave: false, heldId: undefined, equipT: 0, eyeY: 1.62, fov: 72,
+    mobs, ambience,
   };
 
   const LOADING_LINES = ['Knapping flint\u2026', 'Gathering stones\u2026', 'Waking the boars\u2026', 'Stoking the fire\u2026'];
@@ -280,6 +282,10 @@
     game.world = new CM.World(data.seed, scene, materials, data);
     data.spawnChunk = game.world.spawnChunk;
     mobs.setWorld(game.world);
+    ambience.ground = (x, z) => {
+      const y = game.world.topY(Math.floor(x), Math.floor(z));
+      return y < 0 ? game.player.pos.y : y;
+    };
     game.player = new CM.Player(game.world);
     game.hadPlayer = !!data.player;
     if (data.player) game.player.load(data.player); else game.player.giveStarter();
@@ -425,10 +431,15 @@
   }
 
   function killMob(m) {
-    const n = 1 + Math.floor(Math.random() * 2);
-    const got = n - game.player.addItem(I.RAW_MEAT, n);
-    ui.toast(got ? '+' + got + ' Raw boar meat' : 'Bag is full');
-    particles.burst(m.pos.x, m.pos.y + 0.5, m.pos.z, 0x6b4a33, 14);
+    let took = 0, name = '';
+    for (const [id, lo, hi] of m.spec.drops || []) {
+      const n = lo + Math.floor(Math.random() * (hi - lo + 1));
+      if (!n) continue;
+      const got = n - game.player.addItem(id, n);
+      if (got > 0) { took += got; name = CM.info(id).name; }
+    }
+    ui.toast(took ? '+' + took + ' ' + name : 'Bag is full');
+    particles.burst(m.pos.x, m.pos.y + m.spec.h * 0.5, m.pos.z, 0x8e2a31, 14);
     mobs.remove(m);
   }
 
@@ -535,7 +546,9 @@
     game.useRepeat -= dt;
     if (inp.usePressed || (inp.useHeld && game.useRepeat <= 0)) { useItem(hit, p.held(), p.held() ? CM.info(p.held().id) : null); game.useRepeat = 0.3; }
 
-    mobs.update(dt, p);
+    const night = 1 - CM.dayFactor(game.clock);
+    mobs.update(dt, p, night);
+    ambience.update(dt, p, night, game.clock);
     particles.update(dt);
     if (p.dead) { game.state = 'dead'; input.clear(); releaseLock(); ui.hide('inventory'); ui.showDeath(p.deathCause); }
     game.saveT += dt;
@@ -594,7 +607,7 @@
   let lastLight = -1, lastWarm = -1;
   function updateSky() {
     const t = (game.clock / CM.DAY_LEN) % 1, ang = t * Math.PI * 2, sunY = Math.sin(ang);
-    const k = CM.clamp((sunY + 0.14) / 0.44, 0, 1);
+    const k = CM.dayFactor(game.clock);
     const light = 0.14 + 0.86 * Math.pow(k, 1.35);
     // Amber holds while the sun is anywhere near the horizon, which is most of dawn and dusk.
     const warm = CM.clamp(1 - Math.abs(sunY) / 0.5, 0, 1) * k;
@@ -661,7 +674,8 @@
     else if (s === 'title') {
       game.world.update(game.titleCenter.x, game.titleCenter.z);
       game.clock += dt;
-      mobs.update(dt, game.player);
+      mobs.update(dt, game.player, 1 - CM.dayFactor(game.clock));
+      ambience.update(dt, game.player, 1 - CM.dayFactor(game.clock), game.clock);
       poseCaveman(dt);
       updateHand(dt);
       titleCamera(dt);

@@ -15,7 +15,8 @@ sed -i 's#https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js#vend
 sed -i '/fonts.googleapis.com/d;/fonts.gstatic.com/d' dist/index.html
 cp vendor/three.min.js dist/vendor/
 cp style.css dist/
-cp -r js dist/
+cp manifest.webmanifest dist/
+cp -r js icons dist/
 node --check js/core.js && node --check js/blocks.js && node --check js/world.js \
   && node --check js/entities.js && node --check js/ui.js && node --check js/input.js && node --check js/main.js
 echo "built dist/ + syntax ok"

@@ -25,11 +25,96 @@
     water: new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, transparent: true, opacity: 0.82, depthWrite: false, side: THREE.DoubleSide }),
   };
 
+  // ---------- light ----------
+  // The mesher bakes three things into each vertex colour: how much sky the face can see (r),
+  // whether the block glows (g), and its face shading with ambient occlusion (b). The shader
+  // turns those into light, adding the nearest few torches so caves are dark until you light them.
+  const MAX_LIGHTS = 8;
+  const lightU = {
+    uDay: { value: 1 },
+    uSkyCol: { value: new THREE.Color(1, 1, 1) },
+    uTorchCol: { value: new THREE.Color(1, 0.76, 0.46) },
+    uLights: { value: Array.from({ length: MAX_LIGHTS }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uLightCount: { value: 0 },
+  };
+  const LIT_VERTEX = [
+    'vColor = vec3(1.0);',
+    'float blk = 0.0;',
+    // Out in daylight there are no flames nearby, so skip the world-space transform entirely.
+    'if (uLightCount > 0) {',
+    '  vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;',
+    '  for (int i = 0; i < ' + MAX_LIGHTS + '; i++) {',
+    '    if (i >= uLightCount) break;',
+    '    float s = uLights[i].w;',
+    '    if (s > 0.0) blk = max(blk, s * clamp(1.0 - distance(wp, uLights[i].xyz) / 9.0, 0.0, 1.0));',
+    '  }',
+    '}',
+    'float sky = color.r * uDay;',
+    'float lvl = max(max(sky, blk), 0.035);',
+    'vec3 tint = mix(uSkyCol, uTorchCol, blk / max(blk + sky, 0.001));',
+    'vec3 lit = mix(tint * lvl, vec3(1.0), color.g);',
+    'vColor.xyz = lit * color.b;',
+  ].join('\n');
+  function litMaterial(mat) {
+    mat.onBeforeCompile = shader => {
+      Object.assign(shader.uniforms, lightU);
+      shader.vertexShader = 'uniform float uDay;\nuniform vec3 uSkyCol;\nuniform vec3 uTorchCol;\nuniform int uLightCount;\nuniform vec4 uLights[' + MAX_LIGHTS + '];\n'
+        + shader.vertexShader.replace('#include <color_vertex>', LIT_VERTEX);
+    };
+    mat.needsUpdate = true;
+  }
+  litMaterial(materials.opaque);
+  litMaterial(materials.water);
+
+  // Feed the shader the nearest live flames, plus whatever the player is carrying.
+  const lightScratch = [];
+  function updateLights() {
+    const cam = camera.position;
+    lightScratch.length = 0;
+    for (const c of game.world.chunks.values()) {
+      const L = c.lights;
+      if (!L || !L.length) continue;
+      if (Math.abs(c.cx * CM.CHUNK + 8 - cam.x) > 44 || Math.abs(c.cz * CM.CHUNK + 8 - cam.z) > 44) continue;
+      for (let i = 0; i < L.length; i += 4) {
+        const dx = L[i] - cam.x, dy = L[i + 1] - cam.y, dz = L[i + 2] - cam.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < 576) lightScratch.push([d2, L[i], L[i + 1], L[i + 2], L[i + 3]]);
+      }
+    }
+    game.torchLight = 0;
+    for (const L of lightScratch) {
+      const d = Math.sqrt(Math.max(0, L[0]));
+      game.torchLight = Math.max(game.torchLight, L[4] * CM.clamp(1 - d / 9, 0, 1));
+    }
+    const held = game.player && game.player.held();
+    if (held && held.id === B.TORCH) lightScratch.push([-1, cam.x, cam.y, cam.z, 0.85]);
+    lightScratch.sort((a, b) => a[0] - b[0]);
+    const arr = lightU.uLights.value;
+    for (let i = 0; i < MAX_LIGHTS; i++) {
+      const L = lightScratch[i];
+      if (L) arr[i].set(L[1], L[2], L[3], L[4]); else arr[i].set(0, 0, 0, 0);
+    }
+    lightU.uLightCount.value = Math.min(MAX_LIGHTS, lightScratch.length);
+  }
+
+  // Minecraft's tell that a block is about to give: cracks that spread as you dig.
+  const crackTex = CM.crackStages().map(c => {
+    const t = new THREE.CanvasTexture(c);
+    t.magFilter = t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+    return t;
+  });
+  const crack = new THREE.Mesh(
+    new THREE.BoxGeometry(1.003, 1.003, 1.003),
+    new THREE.MeshBasicMaterial({ map: crackTex[0], transparent: true, blending: THREE.MultiplyBlending, depthWrite: false, fog: false }));
+  crack.visible = false;
+  let crackStage = -1;
+
   const highlight = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)),
     new THREE.LineBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.55 }));
   highlight.visible = false;
-  scene.add(highlight);
+  scene.add(highlight, crack);
 
   // ---------- sky ----------
   const sun = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshBasicMaterial({ color: 0xfff0b3, fog: false }));
@@ -75,6 +160,10 @@
   // ---------- what you are holding, shown in your fist ----------
   // Blocks become a shaded cube cut from the atlas; tools and food become their pixel icon.
   const FACE_SHADE = [0.8, 0.8, 1, 0.55, 0.68, 0.68];
+  // Held blocks are lit by where the player is standing, not by the terrain shader.
+  const handBlockMat = new THREE.MeshBasicMaterial({ map: atlasTex, vertexColors: true, alphaTest: 0.5 });
+  handBlockMat.userData.base = handBlockMat.color.clone();
+  CM.tintMats.push(handBlockMat);
   const itemMats = new Map();
   const cubeGeos = new Map();
   let planeGeo = null;
@@ -112,7 +201,7 @@
 
   function buildHeld(id) {
     if (id === null || id === undefined) return null;
-    if (id < 100) return new THREE.Mesh(blockGeo(id), materials.opaque);
+    if (id < 100) return new THREE.Mesh(blockGeo(id), handBlockMat);
     if (!planeGeo) planeGeo = new THREE.PlaneGeometry(1, 1);
     return new THREE.Mesh(planeGeo, itemMat(id));
   }
@@ -276,7 +365,7 @@
   };
   game.quitToTitle = () => {
     save();
-    ui.hide('pause'); ui.hide('hud'); highlight.visible = false;
+    ui.hide('pause'); ui.hide('hud'); highlight.visible = false; crack.visible = false;
     game.titleCenter.set(game.player.pos.x, game.player.pos.y + 1.5, game.player.pos.z);
     game.state = 'title'; ui.setTitle(game.data.name); ui.show('title');
   };
@@ -374,6 +463,7 @@
     const pp = p.pos;
     if (pp.x + 0.3 > x && pp.x - 0.3 < x + 1 && pp.z + 0.3 > z && pp.z - 0.3 < z + 1 && pp.y + 1.8 > y && pp.y < y + 1) return;
     if (mobs.occupies(x, y, z)) return;
+    if (held.id === B.TORCH && !W.isSolid(x, y - 1, z)) { ui.toast('A torch needs solid ground'); return; }
     W.set(x, y, z, held.id);
     p.takeSelected(); CM.sfx('place'); CM.buzz(7); game.swing = 1;
   }
@@ -435,6 +525,13 @@
       }
     } else { game.mining = null; game.miningP = 0; }
 
+    if (game.mining && game.miningP > 0.02) {
+      crack.visible = true;
+      crack.position.set(game.mining.x + 0.5, game.mining.y + 0.5, game.mining.z + 0.5);
+      const stage = Math.min(7, Math.floor(game.miningP * 8));
+      if (stage !== crackStage) { crackStage = stage; crack.material.map = crackTex[stage]; crack.material.needsUpdate = true; }
+    } else if (crack.visible) { crack.visible = false; crackStage = -1; }
+
     game.useRepeat -= dt;
     if (inp.usePressed || (inp.useHeld && game.useRepeat <= 0)) { useItem(hit, p.held(), p.held() ? CM.info(p.held().id) : null); game.useRepeat = 0.3; }
 
@@ -489,19 +586,26 @@
   }
 
   // ---------- sky & daylight ----------
-  const DAY = new THREE.Color(0x8ec3e6), NIGHT = new THREE.Color(0x0c1120), DUSK = new THREE.Color(0xe39163), DEEP = new THREE.Color(0x1d3f78);
-  let lastLight = -1;
+  const DAY = new THREE.Color(0x8ec3e6), NIGHT = new THREE.Color(0x0c1120), DUSK = new THREE.Color(0xff8b3d), DEEP = new THREE.Color(0x1d3f78);
+  // Sunlight has a colour as well as a brightness: white at noon, amber low in the sky,
+  // cold blue after dark. Everything in the world is tinted by it.
+  const SUN_HIGH = new THREE.Color(1, 1, 1), SUN_LOW = new THREE.Color(1, 0.6, 0.3), SUN_NIGHT = new THREE.Color(0.44, 0.55, 0.98);
+  const skyLight = new THREE.Color(1, 1, 1), localCol = new THREE.Color(1, 1, 1);
+  let lastLight = -1, lastWarm = -1;
   function updateSky() {
     const t = (game.clock / CM.DAY_LEN) % 1, ang = t * Math.PI * 2, sunY = Math.sin(ang);
-    const k = CM.clamp((sunY + 0.12) / 0.42, 0, 1);
-    const light = 0.28 + 0.72 * k;
+    const k = CM.clamp((sunY + 0.14) / 0.44, 0, 1);
+    const light = 0.14 + 0.86 * Math.pow(k, 1.35);
+    // Amber holds while the sun is anywhere near the horizon, which is most of dawn and dusk.
+    const warm = CM.clamp(1 - Math.abs(sunY) / 0.5, 0, 1) * k;
+    skyLight.copy(SUN_NIGHT).lerp(SUN_HIGH, k).lerp(SUN_LOW, warm * 0.95);
     CM.music.setNight(1 - k);
     const under = game.state !== 'title' && game.player && game.player.headInWater;
     if (under) {
       skyColor.copy(DEEP).multiplyScalar(light);
       scene.fog.near = 1; scene.fog.far = 14;
     } else {
-      skyColor.copy(NIGHT).lerp(DAY, k).lerp(DUSK, CM.clamp(1 - Math.abs(sunY) / 0.28, 0, 1) * 0.6);
+      skyColor.copy(NIGHT).lerp(DAY, k).lerp(DUSK, CM.clamp(1 - Math.abs(sunY) / 0.42, 0, 1) * 0.85 * Math.max(0.25, k));
       const far = CM.options.renderDist * CM.CHUNK;
       scene.fog.far = far; scene.fog.near = far * 0.5;
     }
@@ -513,13 +617,21 @@
     starMat.opacity = CM.clamp(1 - k * 1.6, 0, 1) * 0.9;
     clouds.position.set(c.x, 92, c.z);
     cloudTex.offset.set(c.x / 300 + game.clock * 0.0015, -c.z / 300);
-    if (Math.abs(light - lastLight) > 0.004) {
-      lastLight = light;
-      materials.opaque.color.setScalar(light);
-      materials.water.color.setScalar(light);
-      cloudMat.color.setScalar(Math.max(0.35, light));
-      for (const m of CM.tintMats) m.color.copy(m.userData.base).multiplyScalar(light);
+    lightU.uDay.value = light;
+    lightU.uSkyCol.value.copy(skyLight);
+    updateLights();
+    if (Math.abs(light - lastLight) > 0.004 || Math.abs(warm - lastWarm) > 0.01) {
+      lastLight = light; lastWarm = warm;
+      cloudMat.color.copy(skyLight).multiplyScalar(Math.max(0.1, light));
     }
+    // The caveman, the boars, the item in your fist: all lit by the light where you stand,
+    // so walking into a cave with a torch actually changes how they look.
+    const p = game.player;
+    const skyTerm = p ? game.world.skyExposure(Math.floor(p.pos.x), Math.floor(p.pos.y + 1.6), Math.floor(p.pos.z)) * light : light;
+    const torchTerm = game.torchLight || 0;
+    const lvl = Math.max(skyTerm, torchTerm, 0.06);
+    localCol.copy(skyLight).lerp(lightU.uTorchCol.value, torchTerm / Math.max(torchTerm + skyTerm, 0.001));
+    for (const m of CM.tintMats) m.color.copy(m.userData.base).multiply(localCol).multiplyScalar(lvl);
   }
 
   function titleCamera(dt) {

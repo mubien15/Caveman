@@ -1,13 +1,13 @@
 // Caveman \u2014 blocks, items, recipes, and procedurally painted textures/icons.
 (function (CM) {
   const B = CM.B = { AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, COBBLE: 4, SAND: 5, WATER: 6, LOG: 7, LEAVES: 8, PLANKS: 9, GLASS: 10,
-    FLINT_ORE: 11, COAL_ORE: 12, BEDROCK: 13, MUDBRICK: 14, THATCH: 15, CAMPFIRE: 16, CLAY: 17 };
+    FLINT_ORE: 11, COAL_ORE: 12, BEDROCK: 13, MUDBRICK: 14, THATCH: 15, CAMPFIRE: 16, CLAY: 17, TORCH: 18 };
   const I = CM.I = { STICK: 100, FLINT_PICK: 101, FLINT_AXE: 102, CLUB: 103, RAW_MEAT: 104, COOKED_MEAT: 105, FLINT: 106, COAL: 107 };
 
   // tex = [top, bottom, side] atlas tile indices
   CM.blocks = [];
   function def(id, name, tex, o) {
-    CM.blocks[id] = Object.assign({ id, name, tex, solid: true, opaque: true, liquid: false, leaves: false, hardness: 1, tool: null, drop: id, stack: 64, block: true }, o);
+    CM.blocks[id] = Object.assign({ id, name, tex, solid: true, opaque: true, liquid: false, leaves: false, hardness: 1, tool: null, drop: id, stack: 64, block: true, light: 0, slim: null }, o);
   }
   def(B.AIR, 'Air', [0, 0, 0], { solid: false, opaque: false, drop: 0 });
   def(B.GRASS, 'Grass', [0, 2, 1], { hardness: 0.6, drop: B.DIRT });
@@ -25,8 +25,10 @@
   def(B.BEDROCK, 'Bedrock', [14, 14, 14], { hardness: Infinity, drop: 0 });
   def(B.MUDBRICK, 'Mud brick', [15, 15, 15], { hardness: 1.4, tool: 'pick' });
   def(B.THATCH, 'Thatch', [16, 16, 16], { hardness: 0.4 });
-  def(B.CAMPFIRE, 'Campfire', [18, 4, 17], { opaque: false, hardness: 0.6, tool: 'axe' });
+  def(B.CAMPFIRE, 'Campfire', [18, 4, 17], { opaque: false, hardness: 0.6, tool: 'axe', light: 0.92 });
   def(B.CLAY, 'Clay', [19, 19, 19], { hardness: 0.6 });
+  // A torch is a slim post rather than a full cube, and lights the dark around it.
+  def(B.TORCH, 'Torch', [21, 20, 20], { solid: false, opaque: false, hardness: 0.05, light: 1, slim: [0.16, 0.62] });
 
   CM.items = {};
   function item(id, name, o) { CM.items[id] = Object.assign({ id, name, stack: 64, block: false }, o); }
@@ -47,6 +49,7 @@
     { out: [I.FLINT_PICK, 1], ins: [[I.FLINT, 3], [I.STICK, 2]] },
     { out: [I.FLINT_AXE, 1], ins: [[I.FLINT, 2], [I.STICK, 2]] },
     { out: [I.CLUB, 1], ins: [[B.LOG, 1], [I.FLINT, 1]] },
+    { out: [B.TORCH, 4], ins: [[I.STICK, 1], [I.COAL, 1]] },
     { out: [B.CAMPFIRE, 1], ins: [[I.STICK, 3], [I.COAL, 1]] },
     { out: [B.THATCH, 2], ins: [[B.LEAVES, 4]] },
     { out: [B.MUDBRICK, 4], ins: [[B.CLAY, 2], [B.SAND, 2]] },
@@ -124,7 +127,64 @@
     },
     /* 18 campfire top */ px => { for (let k = 0; k < 16; k++) { px(k, k, hex('#6b4a2c')); px(k, 15 - k, hex('#6b4a2c')); px(k + 1, k, hex('#4f351d')); } for (let j = 5; j < 11; j++) for (let i = 5; i < 11; i++) if (rnd() < 0.7) px(i, j, hex(rnd() < 0.5 ? '#ff9a3c' : '#ffd35a')); },
     /* 19 clay */ px => { fill(px, '#9fa6b2', 9); specks(px, '#8a919d', 18); },
+    /* 20 torch side */ px => {
+      for (let j = 6; j < 16; j++) for (let i = 0; i < 16; i++) {
+        const grain = i < 3 ? '#4f351d' : i > 12 ? '#5a3d22' : '#6b4a2c';
+        px(i, j, vary(hex(grain), 8));
+      }
+      for (let j = 0; j < 6; j++) for (let i = 0; i < 16; i++) {
+        const core = i > 2 && i < 13 && j > 0;
+        px(i, j, vary(hex(core ? (j > 2 ? '#ffe9a0' : '#ffc24a') : '#e2761f'), 10));
+      }
+    },
+    /* 21 torch top */ px => {
+      for (let j = 0; j < 16; j++) for (let i = 0; i < 16; i++) {
+        const d = Math.max(Math.abs(i - 7.5), Math.abs(j - 7.5));
+        px(i, j, vary(hex(d < 3 ? '#ffeeb0' : d < 6 ? '#ffc24a' : '#e2761f'), 8));
+      }
+    },
   ];
+
+  // Break stages: the same handful of cracks, spreading a little further at each stage,
+  // drawn black on white so they can be multiplied over whatever block is being mined.
+  CM.crackStages = function () {
+    const rnd2 = CM.mulberry32(99173);
+    const paths = [];
+    for (let k = 0; k < 6; k++) {
+      const pts = [];
+      let x = 2 + rnd2() * 12, y = 2 + rnd2() * 12, a = rnd2() * 6.283;
+      pts.push([x, y]);
+      for (let step = 0; step < 9; step++) {
+        a += (rnd2() - 0.5) * 0.9;                  // wanders, but keeps going outward
+        x = CM.clamp(x + Math.cos(a) * 2.2, 0, 16);
+        y = CM.clamp(y + Math.sin(a) * 2.2, 0, 16);
+        pts.push([x, y]);
+      }
+      paths.push(pts);
+    }
+    const out = [];
+    for (let stage = 0; stage < 8; stage++) {
+      const c = document.createElement('canvas');
+      c.width = c.height = TILE;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, TILE, TILE);
+      ctx.strokeStyle = 'rgba(24,20,17,0.8)';
+      ctx.lineWidth = 1;
+      ctx.lineCap = 'square';
+      const grown = (stage + 1) / 8;
+      paths.forEach((pts, i) => {
+        if (i / paths.length > grown) return;       // later cracks only open up near the end
+        const n = Math.max(2, Math.round(pts.length * grown));
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let j = 1; j < n; j++) ctx.lineTo(pts[j][0], pts[j][1]);
+        ctx.stroke();
+      });
+      out.push(c);
+    }
+    return out;
+  };
 
   CM.tiles = [];
   CM.tileColor = [];

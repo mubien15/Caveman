@@ -58,6 +58,12 @@ const probe = async () => page.evaluate(() => {
   };
 });
 console.log('  state:', JSON.stringify(await probe()));
+const fps = await page.evaluate(() => new Promise(res => {
+  let n = 0; const t0 = performance.now();
+  const tick = () => { n++; if (performance.now() - t0 < 3000) requestAnimationFrame(tick); else res(Math.round(n / ((performance.now() - t0) / 1000))); };
+  requestAnimationFrame(tick);
+}));
+console.log('  fps (software renderer, floor not a target):', fps);
 
 if (scenario === 'all' || scenario === 'hand') {
   // look at open ground so the item reads against sky, then shoot each held type

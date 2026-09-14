@@ -10,6 +10,14 @@ window.CM = window.CM || {};
 
   CM.clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
+  // Daylight reaching a cell, given the highest cover above it (anything, and anything solid).
+  // Leaves only dapple the ground; rock and dirt shut the light out properly.
+  CM.skyFalloff = function (y, topAny, topSolid) {
+    if (y > topAny) return 1;
+    if (y > topSolid) return Math.max(0.5, 1 - (topAny - y) / 12);
+    return Math.max(0.045, 1 - (topSolid - y) / 7);
+  };
+
   CM.mulberry32 = function (a) {
     return function () {
       a |= 0; a = (a + 0x6D2B79F5) | 0;

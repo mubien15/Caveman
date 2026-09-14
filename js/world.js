@@ -164,6 +164,19 @@
       }
     }
 
+    // How much sky a point can see, matching what the mesher bakes into the terrain.
+    skyExposure(x, y, z) {
+      let any = -999, solid = -999;
+      for (let yy = H - 1; yy > y; yy--) {
+        const id = this.get(x, yy, z);
+        if (id < 0) return 1;
+        const b = CM.blocks[id];
+        if (any === -999 && (b.opaque || b.leaves)) any = yy;
+        if (b.opaque) { solid = yy; break; }
+      }
+      return CM.skyFalloff(y, any, solid);
+    }
+
     topY(wx, wz) {
       for (let y = H - 1; y >= 0; y--) {
         const id = this.get(wx, y, wz);
@@ -187,11 +200,56 @@
       const opaq = (x, y, z) => blocks[get(x, y, z)].opaque;
       const ao = [0, 0, 0, 0];
 
+      // How much of the sky each cell can see: full in the open, fading to near dark
+      // a few blocks under the surface, so caves and interiors go properly black.
+      // Leaves count as cover, which puts real shade under the trees.
+      const SK = CS + 2;
+      const sunAny = new Int16Array(SK * SK), sunSolid = new Int16Array(SK * SK);
+      for (let z = -1; z <= CS; z++) for (let x = -1; x <= CS; x++) {
+        let any = -999, solid = -999;
+        for (let y = H - 1; y >= 0; y--) {
+          const b = blocks[get(x, y, z)];
+          if (any === -999 && (b.opaque || b.leaves)) any = y;
+          if (b.opaque) { solid = y; break; }
+        }
+        const i = (x + 1) + (z + 1) * SK;
+        sunAny[i] = any; sunSolid[i] = solid;
+      }
+      const skyAt = (x, y, z) => {
+        if (x < -1 || z < -1 || x > CS || z > CS) return 1;
+        const i = (x + 1) + (z + 1) * SK;
+        return CM.skyFalloff(y, sunAny[i], sunSolid[i]);
+      };
+
+      const lights = [];
       for (let y = 0; y < H; y++) for (let z = 0; z < CS; z++) for (let x = 0; x < CS; x++) {
         const id = data[x + z * CS + y * LAYER];
         if (!id) continue;
         const bd = blocks[id];
+        if (bd.light > 0) lights.push(ox + x + 0.5, y + 0.55, oz + z + 0.5, bd.light);
         const liquid = bd.liquid;
+
+        // Torches and the like are a slim post, drawn whole rather than face-culled.
+        if (bd.slim) {
+          const w = bd.slim[0], hh = bd.slim[1];
+          const lo = [0.5 - w / 2, 0, 0.5 - w / 2], hi = [0.5 + w / 2, hh, 0.5 + w / 2];
+          const sky = skyAt(x, y + 1, z);
+          for (let f = 0; f < 6; f++) {
+            const F = FACES[f];
+            const t = f === 2 ? bd.tex[0] : f === 3 ? bd.tex[1] : bd.tex[2];
+            const col = t % N, row = (t / N) | 0;
+            const u0 = (col + eps) / N, u1 = (col + 1 - eps) / N, vt = 1 - (row + eps) / N, vb = 1 - (row + 1 - eps) / N;
+            const base = P.length / 3;
+            for (let k = 0; k < 4; k++) {
+              const cr = F.c[k];
+              P.push(x + (cr[0] ? hi[0] : lo[0]), y + (cr[1] ? hi[1] : lo[1]), z + (cr[2] ? hi[2] : lo[2]));
+              C.push(sky, 1, F.s);            // green channel 1 = lit from within
+            }
+            U.push(u0, vb, u1, vb, u1, vt, u0, vt);
+            IX.push(base, base + 1, base + 2, base, base + 2, base + 3);
+          }
+          continue;
+        }
         const waterTop = liquid && !blocks[get(x, y + 1, z)].liquid;
         for (let f = 0; f < 6; f++) {
           const F = FACES[f], nx = x + F.d[0], ny = y + F.d[1], nz = z + F.d[2];
@@ -206,6 +264,8 @@
           const u0 = (col + eps) / N, u1 = (col + 1 - eps) / N, vt = 1 - (row + eps) / N, vb = 1 - (row + 1 - eps) / N;
           const pos = liquid ? WP : P, cols = liquid ? WC : C, uvs = liquid ? WU : U, idx = liquid ? WI : IX;
           const base = pos.length / 3;
+          const sky = skyAt(nx, ny, nz);
+          const emis = bd.light > 0 ? 1 : 0;
           for (let k = 0; k < 4; k++) {
             const cr = F.c[k];
             let lvl = 3;
@@ -219,8 +279,7 @@
             ao[k] = lvl;
             const yy = waterTop && cr[1] === 1 ? y + 0.88 : y + cr[1];
             pos.push(x + cr[0], yy, z + cr[2]);
-            const b = F.s * AO[lvl];
-            cols.push(b, b, b);
+            cols.push(sky, emis, F.s * AO[lvl]);   // sky exposure, emissive, baked shade
           }
           uvs.push(u0, vb, u1, vb, u1, vt, u0, vt);
           if (ao[0] + ao[2] >= ao[1] + ao[3]) idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
@@ -228,6 +287,7 @@
         }
       }
       this.disposeMeshes(c);
+      c.lights = lights;
       c.mesh = this.makeMesh(P, C, U, IX, this.mat.opaque, ox, oz);
       c.water = this.makeMesh(WP, WC, WU, WI, this.mat.water, ox, oz);
       if (c.water) c.water.renderOrder = 1;

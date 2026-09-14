@@ -115,7 +115,7 @@
     }
     giveStarter() {
       this.inv = new Array(36).fill(null);
-      this.addItem(I.CLUB, 1); this.addItem(I.COOKED_MEAT, 3); this.addItem(B.MUDBRICK, 24); this.addItem(B.THATCH, 16); this.addItem(B.PLANKS, 8);
+      this.addItem(I.CLUB, 1); this.addItem(I.COOKED_MEAT, 3); this.addItem(B.TORCH, 8); this.addItem(B.MUDBRICK, 24); this.addItem(B.THATCH, 16); this.addItem(B.PLANKS, 8);
     }
     serialize() { return { x: this.pos.x, y: this.pos.y, z: this.pos.z, yaw: this.yaw, pitch: this.pitch, health: this.health, hunger: this.hunger, inv: this.inv, sel: this.sel }; }
     load(d) {

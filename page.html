@@ -1,0 +1,118 @@
+<title>Caveman</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1d1b18">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Rubik+Dirt&display=swap">
+<link rel="stylesheet" href="style.css">
+  <canvas id="view" aria-label="Caveman world"></canvas>
+
+  <div id="hud" hidden>
+    <div id="underwater" hidden></div>
+    <div id="hurt"></div>
+    <div class="crosshair" id="crosshair"><i></i></div>
+    <div class="clock" id="clock">Day 1</div>
+    <div class="top-right">
+      <button class="hud-btn" id="btn-pause" aria-label="Pause"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg></button>
+      <button class="hud-btn" id="btn-inv" aria-label="Bag and crafting"><svg viewBox="0 0 24 24"><path d="M9 7 7.5 3.5h9L15 7"/><path d="M8 7h8l3.5 5v5.5A3.5 3.5 0 0 1 16 21H8a3.5 3.5 0 0 1-3.5-3.5V12z"/><path d="M9 12h6"/></svg></button>
+      <button class="hud-btn" id="btn-cam" aria-label="Change camera"><svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    </div>
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+    <div class="joystick" id="joystick"><div class="knob" id="knob"></div></div>
+    <div class="actions">
+      <button class="act" id="act-sneak" aria-pressed="false" aria-label="Sneak"><svg viewBox="0 0 24 24"><path d="M12 4v10"/><path d="M7.5 9.5 12 14l4.5-4.5"/><path d="M5 19h14"/></svg></button>
+      <button class="act" id="act-mine" aria-label="Mine"><svg viewBox="0 0 24 24"><path d="M3.5 9.5C8 4.5 16 4.5 20.5 9.5"/><path d="M12 6.5 7 21"/></svg></button>
+      <button class="act" id="act-use" aria-label="Place or use"><svg viewBox="0 0 24 24"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V11"/><path d="M11 11V4.5a1.5 1.5 0 0 1 3 0V11"/><path d="M14 11V6.5a1.5 1.5 0 0 1 3 0V14c0 4-2.7 7-6.3 7-2.3 0-3.7-1-5-3l-2-3.2a1.5 1.5 0 0 1 2.4-1.8L8 14.5"/></svg></button>
+      <button class="act big" id="act-jump" aria-label="Jump"><svg viewBox="0 0 24 24"><path d="M6 14l6-6 6 6"/><path d="M6 19h12"/></svg></button>
+    </div>
+    <div class="bottom">
+      <div class="held-name" id="held-name"></div>
+      <div class="stats"><div class="meter" id="hearts"></div><div class="meter right" id="hunger"></div></div>
+      <div class="hotbar" id="hotbar"></div>
+    </div>
+  </div>
+
+  <div id="loading" class="screen">
+    <div class="wordmark small">Caveman</div>
+    <p class="loading-text" id="loading-text">Knapping flint&#x2026;</p>
+    <div class="loading-bar"><span id="loading-fill"></span></div>
+  </div>
+
+  <div id="title" class="screen" hidden>
+    <div class="title-block">
+      <h1 class="wordmark">Caveman</h1>
+      <p class="world-name" id="title-world"></p>
+    </div>
+    <nav class="menu">
+      <button class="slab lead" id="btn-play">Play</button>
+      <button class="slab" id="btn-new">New world&#x2026;</button>
+      <button class="slab" id="btn-options">Options&#x2026;</button>
+    </nav>
+    <p class="hint" id="title-hint"></p>
+  </div>
+
+  <div id="pause" class="screen modal" hidden>
+    <div class="panel narrow">
+      <h2>Paused</h2>
+      <p class="sub" id="pause-sub"></p>
+      <button class="slab lead" id="btn-resume">Back to the wild</button>
+      <button class="slab" id="btn-pause-options">Options&#x2026;</button>
+      <button class="slab" id="btn-quit">Save &amp; quit to title</button>
+    </div>
+  </div>
+
+  <div id="inventory" class="screen modal" hidden>
+    <div class="panel">
+      <div class="panel-head"><h2>Bag</h2><button class="slab mini" id="inv-close">Done</button></div>
+      <div class="label">Make</div>
+      <div class="recipes" id="recipes"></div>
+      <div class="label">Carried</div>
+      <div class="grid9" id="bag"></div>
+      <div class="label">Hotbar</div>
+      <div class="grid9" id="bag-hotbar"></div>
+      <p class="hint small">Tap an item, then tap another slot to move it.</p>
+    </div>
+  </div>
+
+  <div id="options" class="screen modal" hidden>
+    <div class="panel narrow">
+      <h2>Options</h2>
+      <label class="field"><span>Render distance <b id="opt-dist-val"></b></span><input type="range" id="opt-dist" min="2" max="6" step="1"></label>
+      <label class="field"><span>Look sensitivity <b id="opt-sens-val"></b></span><input type="range" id="opt-sens" min="0.3" max="2.5" step="0.1"></label>
+      <label class="field check"><input type="checkbox" id="opt-sound"><span>Sound effects</span></label>
+      <label class="field check"><input type="checkbox" id="opt-music"><span>Background music</span></label>
+      <label class="field check touch-only"><input type="checkbox" id="opt-tap"><span>Tap the world to dig &amp; place</span></label>
+      <label class="field check touch-only"><input type="checkbox" id="opt-haptics"><span>Vibration</span></label>
+      <button class="slab lead" id="opt-back">Done</button>
+    </div>
+  </div>
+
+  <div id="newworld" class="screen modal" hidden>
+    <div class="panel narrow">
+      <h2>New world</h2>
+      <label class="field"><span>World name</span><input type="text" id="nw-name" maxlength="28" autocomplete="off"></label>
+      <label class="field"><span>Seed <em>blank = random</em></span><input type="text" id="nw-seed" maxlength="24" autocomplete="off" placeholder="Random"></label>
+      <p class="sub warn">Creating a world replaces the one you have now.</p>
+      <button class="slab lead" id="nw-create">Create world</button>
+      <button class="slab ghost" id="nw-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <div id="death" class="screen modal red" hidden>
+    <div class="panel narrow">
+      <h2>You perished</h2>
+      <p class="sub" id="death-cause"></p>
+      <button class="slab lead" id="btn-respawn">Rise again</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/world.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/input.js"></script>
+<script src="js/main.js"></script>

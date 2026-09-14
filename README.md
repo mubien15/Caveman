@@ -26,10 +26,15 @@ strike · right-click place or eat · `1`–`9` or scroll to pick a slot · `E` 
 ## What is in the world
 
 Grass, sand and stone terrain with carved caves, flint and coal seams, clay by the water,
-trees, boar herds, and a mud-brick hut waiting at spawn. Nine recipes turn logs and flint into
-planks, sticks, a pick, an axe, a club, a campfire, thatch, mud brick and glass. Roast meat on
-a fire before you eat it. Hunger drains, falls hurt, and the world saves itself to
+trees, boar herds, and a mud-brick hut waiting at spawn. Ten recipes turn logs and flint into
+planks, sticks, a pick, an axe, a club, torches, a campfire, thatch, mud brick and glass. Roast
+meat on a fire before you eat it. Hunger drains, falls hurt, and the world saves itself to
 `localStorage` as you play.
+
+Light is real: faces are lit by how much sky they can see, so caves stay black until you plant
+a torch, and foliage only dapples the ground beneath it. Sunlight carries a colour — white at
+noon, amber near the horizon, cold blue after dark — and everything takes its tint from it,
+down to the item in your fist. Blocks crack as they break.
 
 ## Layout
 
@@ -70,6 +75,7 @@ tools/build.sh                          # writes dist/ with the CDN swapped for 
 node tools/smoke.mjs                    # desktop: loads, plays, fast-forwards to night
 node tools/touch.mjs                    # phone: ten control checks
 node tools/layout.mjs                   # screenshots portrait, landscape and desktop
+node tools/audit.mjs                    # the same world at dawn, dusk, night, underground
 ```
 
 Screenshots land in `shots/`. `tools/build.sh` exists because the game is also published as a

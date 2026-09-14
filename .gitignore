@@ -4,3 +4,4 @@ vendor/
 shots/
 *.tgz
 .DS_Store
+page.html
